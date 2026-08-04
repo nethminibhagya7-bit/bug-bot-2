@@ -31,12 +31,12 @@ const LINK_REGEX =
 // yt-dlp format strings per quality option. "best" avoids height limits entirely.
 // All options stay within a single pre-merged file (no ffmpeg needed on this server).
 const QUALITY_FORMATS = {
-  best: "best[ext=mp4]/best",
-  "1080": "best[height<=1080][ext=mp4]/best[height<=1080]",
-  "720": "best[height<=720][ext=mp4]/best[height<=720]",
-  "480": "best[height<=480][ext=mp4]/best[height<=480]",
-  "360": "best[height<=360][ext=mp4]/best[height<=360]",
-  "240": "best[height<=240][ext=mp4]/best[height<=240]",
+  best: "best",
+  "1080": "best[height<=1080]",
+  "720": "best[height<=720]",
+  "480": "best[height<=480]",
+  "360": "best[height<=360]",
+  "240": "best[height<=240]",
 };
 const QUALITY_OPTIONS = Object.keys(QUALITY_FORMATS);
 
@@ -89,7 +89,7 @@ async function ensureYtDlp() {
   console.log("Downloading yt-dlp binary (first run only)...");
   const dest = fs.createWriteStream(YTDLP_PATH);
   await httpsGetFollowRedirects(
-    "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp",
+    "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp",
     dest
   );
   fs.chmodSync(YTDLP_PATH, 0o755);
@@ -115,13 +115,14 @@ async function ensureDeno() {
 
 function downloadMedia(url, quality) {
   return new Promise((resolve, reject) => {
-    const outPath = path.join(TMP_DIR, `dl_${Date.now()}.mp4`);
+    const base = `dl_${Date.now()}`;
+    const outTemplate = path.join(TMP_DIR, `${base}.%(ext)s`);
     const format = QUALITY_FORMATS[quality] || QUALITY_FORMATS[DEFAULT_QUALITY];
     const args = [
       "-f",
       format,
       "-o",
-      outPath,
+      outTemplate,
       "--no-playlist",
       "--max-filesize",
       `${MAX_FILESIZE_MB}M`,
@@ -142,11 +143,13 @@ function downloadMedia(url, quality) {
           reject(err);
           return;
         }
-        if (!fs.existsSync(outPath)) {
+        // Find whichever file yt-dlp actually produced (extension may vary: mp4, webm, mkv...)
+        const produced = fs.readdirSync(TMP_DIR).find((f) => f.startsWith(`${base}.`));
+        if (!produced) {
           reject(new Error("Download did not produce a file (may be too large or unsupported)."));
           return;
         }
-        resolve(outPath);
+        resolve(path.join(TMP_DIR, produced));
       }
     );
   });
