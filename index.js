@@ -203,13 +203,14 @@ async function startBot() {
   });
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify") return;
+    if (type !== "notify" && type !== "append") return;
     const msg = messages[0];
     if (!msg.message) return;
 
     const jid = msg.key.remoteJid;
     const selfJid = jidNormalizedUser(sock.user.id);
     const isSelfChat = jid === selfJid;
+    console.log(`[msg] type=${type} jid=${jid} fromMe=${msg.key.fromMe} isSelfChat=${isSelfChat}`);
     if (msg.key.fromMe && !isSelfChat) return;
     const text = (
       msg.message.conversation ||
