@@ -251,9 +251,6 @@ async function startBot() {
       msg.message.extendedTextMessage?.text ||
       ""
     ).trim();
-
-    console.log(`[msg] type=${type} jid=${jid} fromMe=${msg.key.fromMe} text=${text.slice(0, 60)}`);
-
     // Skip the bot's own automated replies (identified by their leading emoji),
     // so it never reprocesses its own "Downloading..." / "Here you go!" messages.
     // This also means we do NOT need to special-case self-chat detection at all:
