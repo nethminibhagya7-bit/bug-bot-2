@@ -22,7 +22,7 @@ const DENO_PATH = path.join(BIN_DIR, "deno");
 const SETTINGS_PATH = path.join(__dirname, "settings.json");
 const COOKIES_PATH = path.join(__dirname, "youtube_cookies.txt");
 const TMP_DIR = os.tmpdir();
-const MAX_FILESIZE_MB = 100; // Our own safety cap — WhatsApp's own limit (often ~16MB, sometimes more on multi-device) may still reject larger sends
+const MAX_FILESIZE_MB = 1000; // Raised to 1GB at user's request — real risk: server has limited RAM and reads the whole file into memory before sending, so very large files may crash the process (OOM) rather than fail gracefully
 const DEFAULT_QUALITY = "best";
 
 // Matches a YouTube, Instagram, TikTok, or Facebook URL anywhere in the message text
@@ -33,11 +33,11 @@ const LINK_REGEX =
 // All options stay within a single pre-merged file (no ffmpeg needed on this server).
 const QUALITY_FORMATS = {
   best: "bestvideo+bestaudio/best",
-  "1080": "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-  "720": "bestvideo[height<=720]+bestaudio/best[height<=720]",
-  "480": "bestvideo[height<=480]+bestaudio/best[height<=480]",
-  "360": "bestvideo[height<=360]+bestaudio/best[height<=360]",
-  "240": "bestvideo[height<=240]+bestaudio/best[height<=240]",
+  "1080": "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+  "720": "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+  "480": "bestvideo[height<=480]+bestaudio/best[height<=480]/best",
+  "360": "bestvideo[height<=360]+bestaudio/best[height<=360]/best",
+  "240": "bestvideo[height<=240]+bestaudio/best[height<=240]/best",
 };
 const QUALITY_OPTIONS = Object.keys(QUALITY_FORMATS);
 
