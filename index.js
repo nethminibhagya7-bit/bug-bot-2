@@ -3,6 +3,7 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  jidNormalizedUser,
 } = require("@whiskeysockets/baileys");
 const { Boom } = require("@hapi/boom");
 const qrcode = require("qrcode-terminal");
@@ -204,9 +205,12 @@ async function startBot() {
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify") return;
     const msg = messages[0];
-    if (!msg.message || msg.key.fromMe) return;
+    if (!msg.message) return;
 
     const jid = msg.key.remoteJid;
+    const selfJid = jidNormalizedUser(sock.user.id);
+    const isSelfChat = jid === selfJid;
+    if (msg.key.fromMe && !isSelfChat) return;
     const text = (
       msg.message.conversation ||
       msg.message.extendedTextMessage?.text ||
