@@ -232,6 +232,19 @@ async function startBot() {
     const msg = messages[0];
     if (!msg.message) return;
 
+    // Ignore anything not sent within the last 30 seconds — this filters out
+    // historical message backfill/sync that WhatsApp sends on reconnect
+    // (which otherwise gets reprocessed as a flood of old links/commands).
+    const nowSec = Math.floor(Date.now() / 1000);
+    const msgTimeRaw = msg.messageTimestamp;
+    const msgTime =
+      typeof msgTimeRaw === "number"
+        ? msgTimeRaw
+        : msgTimeRaw?.toNumber
+        ? msgTimeRaw.toNumber()
+        : nowSec;
+    if (nowSec - msgTime > 30) return;
+
     const jid = msg.key.remoteJid;
     const text = (
       msg.message.conversation ||
