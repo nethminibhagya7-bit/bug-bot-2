@@ -299,14 +299,6 @@ async function startBot() {
       }
       console.log("Download requested via /download:", url);
       await handleDownload(sock, jid, msg, url);
-      return;
-    }
-
-    // Fallback: auto-detect a bare link pasted without any command
-    const autoMatch = text.match(LINK_REGEX);
-    if (autoMatch) {
-      console.log("Download requested (auto-detected link):", autoMatch[1]);
-      await handleDownload(sock, jid, msg, autoMatch[1]);
     }
   });
 }
