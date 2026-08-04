@@ -13,6 +13,7 @@ const path = require("path");
 const os = require("os");
 const pino = require("pino");
 const AdmZip = require("adm-zip");
+const ffmpegPath = require("ffmpeg-static");
 
 const AUTH_DIR = path.join(__dirname, "auth_info");
 const BIN_DIR = path.join(__dirname, "bin");
@@ -21,7 +22,7 @@ const DENO_PATH = path.join(BIN_DIR, "deno");
 const SETTINGS_PATH = path.join(__dirname, "settings.json");
 const COOKIES_PATH = path.join(__dirname, "youtube_cookies.txt");
 const TMP_DIR = os.tmpdir();
-const MAX_FILESIZE_MB = 50; // WhatsApp media caps out well below this in practice; keep it safe
+const MAX_FILESIZE_MB = 100; // Our own safety cap — WhatsApp's own limit (often ~16MB, sometimes more on multi-device) may still reject larger sends
 const DEFAULT_QUALITY = "best";
 
 // Matches a YouTube, Instagram, TikTok, or Facebook URL anywhere in the message text
@@ -31,12 +32,12 @@ const LINK_REGEX =
 // yt-dlp format strings per quality option. "best" avoids height limits entirely.
 // All options stay within a single pre-merged file (no ffmpeg needed on this server).
 const QUALITY_FORMATS = {
-  best: "best",
-  "1080": "best[height<=1080]",
-  "720": "best[height<=720]",
-  "480": "best[height<=480]",
-  "360": "best[height<=360]",
-  "240": "best[height<=240]",
+  best: "bestvideo+bestaudio/best",
+  "1080": "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+  "720": "bestvideo[height<=720]+bestaudio/best[height<=720]",
+  "480": "bestvideo[height<=480]+bestaudio/best[height<=480]",
+  "360": "bestvideo[height<=360]+bestaudio/best[height<=360]",
+  "240": "bestvideo[height<=240]+bestaudio/best[height<=240]",
 };
 const QUALITY_OPTIONS = Object.keys(QUALITY_FORMATS);
 
@@ -128,6 +129,10 @@ function downloadMedia(url, quality) {
       `${MAX_FILESIZE_MB}M`,
       "--extractor-args",
       "youtube:player_client=android,web",
+      "--ffmpeg-location",
+      ffmpegPath,
+      "--merge-output-format",
+      "mp4",
     ];
     if (fs.existsSync(COOKIES_PATH)) {
       args.push("--cookies", COOKIES_PATH);
