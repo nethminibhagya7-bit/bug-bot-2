@@ -107,6 +107,8 @@ function downloadMedia(url, quality) {
         "--no-playlist",
         "--max-filesize",
         `${MAX_FILESIZE_MB}M`,
+        "--extractor-args",
+        "youtube:player_client=android,web",
         url,
       ],
       { maxBuffer: 1024 * 1024 * 20 },
