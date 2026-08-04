@@ -17,6 +17,7 @@ const AUTH_DIR = path.join(__dirname, "auth_info");
 const BIN_DIR = path.join(__dirname, "bin");
 const YTDLP_PATH = path.join(BIN_DIR, "yt-dlp");
 const SETTINGS_PATH = path.join(__dirname, "settings.json");
+const COOKIES_PATH = path.join(__dirname, "youtube_cookies.txt");
 const TMP_DIR = os.tmpdir();
 const MAX_FILESIZE_MB = 50; // WhatsApp media caps out well below this in practice; keep it safe
 const DEFAULT_QUALITY = "best";
@@ -97,20 +98,25 @@ function downloadMedia(url, quality) {
   return new Promise((resolve, reject) => {
     const outPath = path.join(TMP_DIR, `dl_${Date.now()}.mp4`);
     const format = QUALITY_FORMATS[quality] || QUALITY_FORMATS[DEFAULT_QUALITY];
+    const args = [
+      "-f",
+      format,
+      "-o",
+      outPath,
+      "--no-playlist",
+      "--max-filesize",
+      `${MAX_FILESIZE_MB}M`,
+      "--extractor-args",
+      "youtube:player_client=android,web",
+    ];
+    if (fs.existsSync(COOKIES_PATH)) {
+      args.push("--cookies", COOKIES_PATH);
+    }
+    args.push(url);
+
     execFile(
       YTDLP_PATH,
-      [
-        "-f",
-        format,
-        "-o",
-        outPath,
-        "--no-playlist",
-        "--max-filesize",
-        `${MAX_FILESIZE_MB}M`,
-        "--extractor-args",
-        "youtube:player_client=android,web",
-        url,
-      ],
+      args,
       { maxBuffer: 1024 * 1024 * 20 },
       (err) => {
         if (err) {
