@@ -3,7 +3,6 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
-  jidNormalizedUser,
 } = require("@whiskeysockets/baileys");
 const { Boom } = require("@hapi/boom");
 const qrcode = require("qrcode-terminal");
@@ -208,15 +207,19 @@ async function startBot() {
     if (!msg.message) return;
 
     const jid = msg.key.remoteJid;
-    const selfJid = jidNormalizedUser(sock.user.id);
-    const isSelfChat = jid === selfJid;
-    console.log(`[msg] type=${type} jid=${jid} fromMe=${msg.key.fromMe} isSelfChat=${isSelfChat}`);
-    if (msg.key.fromMe && !isSelfChat) return;
     const text = (
       msg.message.conversation ||
       msg.message.extendedTextMessage?.text ||
       ""
     ).trim();
+
+    console.log(`[msg] type=${type} jid=${jid} fromMe=${msg.key.fromMe} text=${text.slice(0, 60)}`);
+
+    // Skip the bot's own automated replies (identified by their leading emoji),
+    // so it never reprocesses its own "Downloading..." / "Here you go!" messages.
+    // This also means we do NOT need to special-case self-chat detection at all:
+    // any other message you send (in any chat, including Message Yourself) is processed normally.
+    if (msg.key.fromMe && /^(⏳|✅|⚠️)/.test(text)) return;
 
     // /quality [value] — view or set preferred download quality for this chat
     if (/^\/quality\b/i.test(text)) {
