@@ -16,12 +16,47 @@ const pino = require("pino");
 const AUTH_DIR = path.join(__dirname, "auth_info");
 const BIN_DIR = path.join(__dirname, "bin");
 const YTDLP_PATH = path.join(BIN_DIR, "yt-dlp");
+const SETTINGS_PATH = path.join(__dirname, "settings.json");
 const TMP_DIR = os.tmpdir();
 const MAX_FILESIZE_MB = 50; // WhatsApp media caps out well below this in practice; keep it safe
+const DEFAULT_QUALITY = "best";
 
 // Matches a YouTube, Instagram, TikTok, or Facebook URL anywhere in the message text
 const LINK_REGEX =
   /(https?:\/\/(www\.)?(youtube\.com|youtu\.be|instagram\.com|tiktok\.com|facebook\.com|fb\.watch)\/[^\s]+)/i;
+
+// yt-dlp format strings per quality option. "best" avoids height limits entirely.
+// All options stay within a single pre-merged file (no ffmpeg needed on this server).
+const QUALITY_FORMATS = {
+  best: "best[ext=mp4]/best",
+  "1080": "best[height<=1080][ext=mp4]/best[height<=1080]",
+  "720": "best[height<=720][ext=mp4]/best[height<=720]",
+  "480": "best[height<=480][ext=mp4]/best[height<=480]",
+  "360": "best[height<=360][ext=mp4]/best[height<=360]",
+  "240": "best[height<=240][ext=mp4]/best[height<=240]",
+};
+const QUALITY_OPTIONS = Object.keys(QUALITY_FORMATS);
+
+// ---------- Per-chat settings (quality) persisted to disk ----------
+function loadSettings() {
+  try {
+    return JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
+  } catch {
+    return {};
+  }
+}
+function saveSettings(settings) {
+  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
+}
+let settings = loadSettings();
+
+function getQuality(jid) {
+  return settings[jid] || DEFAULT_QUALITY;
+}
+function setQuality(jid, quality) {
+  settings[jid] = quality;
+  saveSettings(settings);
+}
 
 // ---------- Download and prepare a static yt-dlp binary (no Python required) ----------
 function httpsGetFollowRedirects(url, destStream) {
@@ -58,14 +93,15 @@ async function ensureYtDlp() {
   console.log("yt-dlp binary ready.");
 }
 
-function downloadMedia(url) {
+function downloadMedia(url, quality) {
   return new Promise((resolve, reject) => {
     const outPath = path.join(TMP_DIR, `dl_${Date.now()}.mp4`);
+    const format = QUALITY_FORMATS[quality] || QUALITY_FORMATS[DEFAULT_QUALITY];
     execFile(
       YTDLP_PATH,
       [
         "-f",
-        "mp4",
+        format,
         "-o",
         outPath,
         "--no-playlist",
@@ -87,6 +123,47 @@ function downloadMedia(url) {
       }
     );
   });
+}
+
+async function handleDownload(sock, jid, msg, url) {
+  const quality = getQuality(jid);
+  let filePath;
+  try {
+    await sock.sendMessage(
+      jid,
+      { text: `⏳ Downloading (${quality === "best" ? "best quality" : quality + "p"}), hang on...` },
+      { quoted: msg }
+    );
+    filePath = await downloadMedia(url, quality);
+
+    const stats = fs.statSync(filePath);
+    const mb = stats.size / (1024 * 1024);
+    if (mb > MAX_FILESIZE_MB) {
+      await sock.sendMessage(
+        jid,
+        { text: `⚠️ That video is too large (${mb.toFixed(1)}MB) to send over WhatsApp. Try a lower quality with /quality.` },
+        { quoted: msg }
+      );
+      return;
+    }
+
+    await sock.sendMessage(
+      jid,
+      { video: fs.readFileSync(filePath), caption: "✅ Here you go!" },
+      { quoted: msg }
+    );
+  } catch (err) {
+    console.error("Download error:", err.message);
+    await sock.sendMessage(
+      jid,
+      { text: `⚠️ Couldn't download that: ${err.message}` },
+      { quoted: msg }
+    );
+  } finally {
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlink(filePath, () => {});
+    }
+  }
 }
 
 // ---------- WhatsApp bot ----------
@@ -128,49 +205,59 @@ async function startBot() {
     if (!msg.message || msg.key.fromMe) return;
 
     const jid = msg.key.remoteJid;
-    const text =
+    const text = (
       msg.message.conversation ||
       msg.message.extendedTextMessage?.text ||
-      "";
+      ""
+    ).trim();
 
-    const match = text.match(LINK_REGEX);
-    if (!match) return;
-
-    const url = match[1];
-    console.log("Download requested:", url);
-
-    let filePath;
-    try {
-      await sock.sendMessage(jid, { text: "⏳ Downloading, hang on..." }, { quoted: msg });
-      filePath = await downloadMedia(url);
-
-      const stats = fs.statSync(filePath);
-      const mb = stats.size / (1024 * 1024);
-      if (mb > MAX_FILESIZE_MB) {
+    // /quality [value] — view or set preferred download quality for this chat
+    if (/^\/quality\b/i.test(text)) {
+      const parts = text.split(/\s+/);
+      const requested = parts[1];
+      if (!requested) {
         await sock.sendMessage(
           jid,
-          { text: `⚠️ That video is too large (${mb.toFixed(1)}MB) to send over WhatsApp.` },
+          {
+            text: `Current quality: *${getQuality(jid)}*\nOptions: ${QUALITY_OPTIONS.join(", ")}\nSet with: /quality 720`,
+          },
+          { quoted: msg }
+        );
+      } else if (QUALITY_OPTIONS.includes(requested.toLowerCase())) {
+        setQuality(jid, requested.toLowerCase());
+        await sock.sendMessage(jid, { text: `✅ Quality set to *${requested}*.` }, { quoted: msg });
+      } else {
+        await sock.sendMessage(
+          jid,
+          { text: `⚠️ Unknown quality "${requested}". Options: ${QUALITY_OPTIONS.join(", ")}` },
+          { quoted: msg }
+        );
+      }
+      return;
+    }
+
+    // /download <link> or /dl <link>
+    const cmdMatch = text.match(/^\/(?:download|dl)\s+(\S+)/i);
+    if (cmdMatch) {
+      const url = cmdMatch[1];
+      if (!LINK_REGEX.test(url)) {
+        await sock.sendMessage(
+          jid,
+          { text: "⚠️ That doesn't look like a YouTube, Instagram, TikTok, or Facebook link." },
           { quoted: msg }
         );
         return;
       }
+      console.log("Download requested via /download:", url);
+      await handleDownload(sock, jid, msg, url);
+      return;
+    }
 
-      await sock.sendMessage(
-        jid,
-        { video: fs.readFileSync(filePath), caption: "✅ Here you go!" },
-        { quoted: msg }
-      );
-    } catch (err) {
-      console.error("Download error:", err.message);
-      await sock.sendMessage(
-        jid,
-        { text: `⚠️ Couldn't download that: ${err.message}` },
-        { quoted: msg }
-      );
-    } finally {
-      if (filePath && fs.existsSync(filePath)) {
-        fs.unlink(filePath, () => {});
-      }
+    // Fallback: auto-detect a bare link pasted without any command
+    const autoMatch = text.match(LINK_REGEX);
+    if (autoMatch) {
+      console.log("Download requested (auto-detected link):", autoMatch[1]);
+      await handleDownload(sock, jid, msg, autoMatch[1]);
     }
   });
 }
