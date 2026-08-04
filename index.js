@@ -12,10 +12,12 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const pino = require("pino");
+const AdmZip = require("adm-zip");
 
 const AUTH_DIR = path.join(__dirname, "auth_info");
 const BIN_DIR = path.join(__dirname, "bin");
 const YTDLP_PATH = path.join(BIN_DIR, "yt-dlp");
+const DENO_PATH = path.join(BIN_DIR, "deno");
 const SETTINGS_PATH = path.join(__dirname, "settings.json");
 const COOKIES_PATH = path.join(__dirname, "youtube_cookies.txt");
 const TMP_DIR = os.tmpdir();
@@ -94,6 +96,23 @@ async function ensureYtDlp() {
   console.log("yt-dlp binary ready.");
 }
 
+async function ensureDeno() {
+  if (fs.existsSync(DENO_PATH)) return;
+  fs.mkdirSync(BIN_DIR, { recursive: true });
+  console.log("Downloading deno binary (first run only, needed for YouTube JS challenges)...");
+  const zipPath = path.join(BIN_DIR, "deno.zip");
+  const dest = fs.createWriteStream(zipPath);
+  await httpsGetFollowRedirects(
+    "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip",
+    dest
+  );
+  const zip = new AdmZip(zipPath);
+  zip.extractAllTo(BIN_DIR, true);
+  fs.chmodSync(DENO_PATH, 0o755);
+  fs.unlinkSync(zipPath);
+  console.log("deno binary ready.");
+}
+
 function downloadMedia(url, quality) {
   return new Promise((resolve, reject) => {
     const outPath = path.join(TMP_DIR, `dl_${Date.now()}.mp4`);
@@ -117,7 +136,7 @@ function downloadMedia(url, quality) {
     execFile(
       YTDLP_PATH,
       args,
-      { maxBuffer: 1024 * 1024 * 20 },
+      { maxBuffer: 1024 * 1024 * 20, env: { ...process.env, PATH: `${BIN_DIR}:${process.env.PATH}` } },
       (err) => {
         if (err) {
           reject(err);
@@ -177,6 +196,7 @@ async function handleDownload(sock, jid, msg, url) {
 // ---------- WhatsApp bot ----------
 async function startBot() {
   await ensureYtDlp();
+  await ensureDeno();
 
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
   const { version } = await fetchLatestBaileysVersion();
