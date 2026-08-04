@@ -160,13 +160,17 @@ function downloadMedia(url, quality) {
   });
 }
 
-async function handleDownload(sock, jid, msg, url) {
+async function handleDownload(sock, jid, msg, url, asDocument) {
   const quality = getQuality(jid);
   let filePath;
   try {
     await sock.sendMessage(
       jid,
-      { text: `⏳ Downloading (${quality === "best" ? "best quality" : quality + "p"}), hang on...` },
+      {
+        text: `⏳ Downloading (${quality === "best" ? "best quality" : quality + "p"}${
+          asDocument ? ", as file — no compression" : ""
+        }), hang on...`,
+      },
       { quoted: msg }
     );
     filePath = await downloadMedia(url, quality);
@@ -182,11 +186,24 @@ async function handleDownload(sock, jid, msg, url) {
       return;
     }
 
-    await sock.sendMessage(
-      jid,
-      { video: fs.readFileSync(filePath), caption: "✅ Here you go!" },
-      { quoted: msg }
-    );
+    if (asDocument) {
+      await sock.sendMessage(
+        jid,
+        {
+          document: fs.readFileSync(filePath),
+          mimetype: "video/mp4",
+          fileName: `video_${Date.now()}.mp4`,
+          caption: "✅ Here you go (full quality, sent as a file)!",
+        },
+        { quoted: msg }
+      );
+    } else {
+      await sock.sendMessage(
+        jid,
+        { video: fs.readFileSync(filePath), caption: "✅ Here you go!" },
+        { quoted: msg }
+      );
+    }
   } catch (err) {
     console.error("Download error:", err.message);
     await sock.sendMessage(
@@ -290,10 +307,12 @@ async function startBot() {
       return;
     }
 
-    // /download <link> or /dl <link>
-    const cmdMatch = text.match(/^\/(?:download|dl)\s+(\S+)/i);
+    // /download <link>, /dl <link> — normal video message (WhatsApp compresses it)
+    // /dlhd <link> — sent as a document/file instead, so WhatsApp does not recompress it
+    const cmdMatch = text.match(/^\/(download|dl|dlhd)\s+(\S+)/i);
     if (cmdMatch) {
-      const url = cmdMatch[1];
+      const asDocument = cmdMatch[1].toLowerCase() === "dlhd";
+      const url = cmdMatch[2];
       if (!LINK_REGEX.test(url)) {
         await sock.sendMessage(
           jid,
@@ -302,8 +321,8 @@ async function startBot() {
         );
         return;
       }
-      console.log("Download requested via /download:", url);
-      await handleDownload(sock, jid, msg, url);
+      console.log(`Download requested via /${cmdMatch[1]}:`, url);
+      await handleDownload(sock, jid, msg, url, asDocument);
     }
   });
 }
